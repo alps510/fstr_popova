@@ -1,4 +1,5 @@
-from typing import List
+from datetime import datetime
+from typing import Optional, List
 import databases
 import sqlalchemy
 from sqlalchemy import create_engine
@@ -6,9 +7,20 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from fastapi import FastAPI
 from pydantic import BaseModel
+from asyncpg.exceptions import UniqueViolationError
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-DATABASE_URL = "postgresql+psycopg2://postgres:666666@192.168.56.101:5432/pereval"
+FSTR_DB_HOST = os.getenv('FSTR_DB_HOST')
+FSTR_DB_PORT = os.getenv('FSTR_DB_PORT')
+FSTR_DB_LOGIN = os.getenv('FSTR_DB_LOGIN')
+FSTR_DB_PASS = os.getenv('FSTR_DB_PASS')
+
+
+DATABASE_URL = 'postgresql+psycopg2://' + FSTR_DB_LOGIN + ':' + FSTR_DB_PASS + '@' + FSTR_DB_HOST + ':' + FSTR_DB_PORT + '/pereval'
 database = databases.Database(DATABASE_URL)
 
 metadata = sqlalchemy.MetaData()
@@ -75,17 +87,49 @@ Base = declarative_base()
 
 metadata.create_all(engine)
 
-#class PostIn(BaseModel):
-#    title: str
-#   text: str
-#  is_published: bool
+
+class Users(BaseModel):
+    email: str
+    fam: str
+    name: str
+    otc: Optional[str]
+    phone: str
 
 
-#class Post(BaseModel):
-#    id: int
-#    title: str
-#    text: str
-#    is_published: bool
+class Coords(BaseModel):
+    latitude: float
+    longitude: float
+    height: int
+
+
+class Levels(BaseModel):
+    winter: Optional[str]
+    summer: Optional[str]
+    autumn: Optional[str]
+    spring: Optional[str]
+
+
+class Images(BaseModel):
+    data: Optional[bytes] = None
+    title: Optional[str] = None
+
+
+class Pereval_added(BaseModel):
+    beauty_title: str
+    title: str
+    other_titles: str
+    connect: Optional[str]
+    add_time: datetime
+    user: Users
+    coords: Coords
+    level: Levels
+    images: Optional[List[Images]]
+
+
+class Response(BaseModel):
+   status: int
+   message: str
+   pereval_id: Optional[int] = None
 
 app = FastAPI()
 
@@ -98,3 +142,54 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
+
+
+@app.post('/', response_model=Response)
+async def submitData(input_json):
+    try:
+        input_str = Pereval_added.parse_raw(input_json)
+        db = SessionLocal()
+
+        try:
+            query_coords = coords.insert().values(
+                latitude=input_str.coords.latitude,
+                longitude=input_str.coords.longitude,
+                height=input_str.coords.height)
+
+            last_id_coords = await database.execute(query_coords)
+
+            query_pereval = pereval_added.insert().values(
+                date=input_str.add_time,
+                beautyTitle=input_str.beauty_title,
+                title=input_str.title,
+                other_titles=input_str.other_titles,
+                connect=input_str.connect,
+                user_id=db.query(users).filter(users.c.email == input_str.user.email).scalar(),
+                coords_id=last_id_coords,
+                level_winter=input_str.level.winter,
+                level_spring=input_str.level.spring,
+                level_summer=input_str.level.summer,
+                level_autumn=input_str.level.autumn,
+                status='new')
+            last_id = await database.execute(query_pereval)
+
+            if input_str.images:
+                for img in input_str:
+                    query_images = images.insert().values(
+                        data=img.data,
+                        title=img.title)
+
+                    last_id_img = await database.execute(query_images)
+                    query_pereval_img = pereval_images.insert().values(
+                        pereval_added_id=last_id,
+                        image_id=last_id_img)
+                    last_id_pereval_img = await database.execute(query_pereval_img)
+
+            return {"status": 200, "message": "Success!", "pereval_id": last_id}
+        except UniqueViolationError:
+            return {"status": 500, "message": "Server error"}
+    except ValueError:
+        return {"status": 400, "message": "Invalid data!"}
+
+
+
