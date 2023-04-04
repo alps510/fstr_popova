@@ -1,15 +1,16 @@
-from datetime import datetime
-from typing import Optional, List
+from fastapi.responses import JSONResponse
+from typing import List
 import databases
-import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Depends
 from asyncpg.exceptions import UniqueViolationError
 import os
 from dotenv import load_dotenv
+
+from models import coords, pereval_added, users, images, pereval_images, metadata
+from schemas import Response, Pereval_added, Users, Pereval_out_list, Pereval_out, Pereval_out_update
 
 load_dotenv()
 
@@ -23,63 +24,6 @@ FSTR_DB_PASS = os.getenv('FSTR_DB_PASS')
 DATABASE_URL = 'postgresql+psycopg2://' + FSTR_DB_LOGIN + ':' + FSTR_DB_PASS + '@' + FSTR_DB_HOST + ':' + FSTR_DB_PORT + '/pereval'
 database = databases.Database(DATABASE_URL)
 
-metadata = sqlalchemy.MetaData()
-
-
-coords = sqlalchemy.Table(
-    'coords',
-    metadata,
-    sqlalchemy.Column('id', sqlalchemy.INTEGER, primary_key=True),
-    sqlalchemy.Column('latitude', sqlalchemy.Float, nullable=False),
-    sqlalchemy.Column('longitude', sqlalchemy.Float, nullable=False),
-    sqlalchemy.Column('height', sqlalchemy.Integer, nullable=False),
-)
-
-images = sqlalchemy.Table(
-    'images',
-    metadata,
-    sqlalchemy.Column('id', sqlalchemy.Integer, primary_key=True),
-    sqlalchemy.Column('title', sqlalchemy.String(20), nullable=False),
-    sqlalchemy.Column('image', sqlalchemy.LargeBinary, nullable=False),
-)
-
-users = sqlalchemy.Table(
-    'users',
-    metadata,
-    sqlalchemy.Column('id', sqlalchemy.Integer, primary_key=True),
-    sqlalchemy.Column('email', sqlalchemy.String(20), nullable=False, unique=True),
-    sqlalchemy.Column('phone', sqlalchemy.String(20), unique=True),
-    sqlalchemy.Column('surname', sqlalchemy.String(20), nullable=False),
-    sqlalchemy.Column('name', sqlalchemy.String(20), nullable=False),
-    sqlalchemy.Column('patronimic', sqlalchemy.String(20)),
-)
-
-pereval_added = sqlalchemy.Table(
-    'pereval_added',
-    metadata,
-    sqlalchemy.Column('id', sqlalchemy.Integer, primary_key=True),
-    sqlalchemy.Column('date', sqlalchemy.DateTime, nullable=False),
-    sqlalchemy.Column('beautyTitle', sqlalchemy.String(20)),
-    sqlalchemy.Column('title', sqlalchemy.String(20), nullable=False),
-    sqlalchemy.Column('other_titles', sqlalchemy.String(20)),
-    sqlalchemy.Column('connect', sqlalchemy.String(20)),
-    sqlalchemy.Column('user_id', sqlalchemy.ForeignKey('users.id'), nullable=False),
-    sqlalchemy.Column('coords_id', sqlalchemy.ForeignKey('coords.id'), nullable=False),
-    sqlalchemy.Column('level_winter', sqlalchemy.String(2)),
-    sqlalchemy.Column('level_spring', sqlalchemy.String(2)),
-    sqlalchemy.Column('level_summer', sqlalchemy.String(2)),
-    sqlalchemy.Column('level_autumn', sqlalchemy.String(2)),
-    sqlalchemy.Column('status', sqlalchemy.String(10), nullable=False),
-                      )
-
-pereval_images = sqlalchemy.Table(
-    'pereval_images',
-    metadata,
-    sqlalchemy.Column('id', sqlalchemy.Integer, primary_key=True),
-    sqlalchemy.Column('pereval_added_id', sqlalchemy.ForeignKey('pereval_added.id'), nullable=False),
-    sqlalchemy.Column('image_id', sqlalchemy.ForeignKey('images.id'), nullable=False),
-)
-
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -88,50 +32,15 @@ Base = declarative_base()
 metadata.create_all(engine)
 
 
-class Users(BaseModel):
-    email: str
-    fam: str
-    name: str
-    otc: Optional[str]
-    phone: str
-
-
-class Coords(BaseModel):
-    latitude: float
-    longitude: float
-    height: int
-
-
-class Levels(BaseModel):
-    winter: Optional[str]
-    summer: Optional[str]
-    autumn: Optional[str]
-    spring: Optional[str]
-
-
-class Images(BaseModel):
-    data: Optional[bytes] = None
-    title: Optional[str] = None
-
-
-class Pereval_added(BaseModel):
-    beauty_title: str
-    title: str
-    other_titles: str
-    connect: Optional[str]
-    add_time: datetime
-    user: Users
-    coords: Coords
-    level: Levels
-    images: Optional[List[Images]]
-
-
-class Response(BaseModel):
-   status: int
-   message: str
-   pereval_id: Optional[int] = None
-
 app = FastAPI()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 @app.on_event("startup")
@@ -192,4 +101,77 @@ async def submitData(input_json):
         return {"status": 400, "message": "Invalid data!"}
 
 
+@app.post('/users/')
+async def create_user(user: Users):
+    query = users.insert().values(
+        email=user.email,
+        phone=user.phone,
+        surname=user.fam,
+        name=user.name,
+        patronimic=user.otc)
 
+    last_id = await database.execute(query)
+    return {'id': last_id}
+
+
+@app.get('/', response_model=List[Pereval_out_list])
+async def read_data(user_id: int, db: SessionLocal = Depends(get_db)):
+
+    data = db.query(pereval_added, coords)\
+        .filter(pereval_added.c.coords_id==coords.c.id)\
+        .filter(pereval_added.c.user_id==user_id)
+    data = data.outerjoin(pereval_images, pereval_images.c.pereval_added_id==pereval_added.c.id)
+    data = data.outerjoin(images, images.c.id==pereval_images.c.image_id)
+
+    return data.all()
+
+
+@app.get('/{item_id}', response_model=Pereval_out, responses={404: {"model": Response}})
+async def read_item(item_id: int, db: SessionLocal = Depends(get_db)):
+    try:
+        data = db.query(pereval_added).filter(pereval_added.c.id==item_id)[0]
+    except IndexError:
+        return JSONResponse(status_code=404, content={"message": "Item not found"})
+    else:
+        if data.status != 'accepted':
+            return JSONResponse(status_code=404, content={"message": "Item is not checked"})
+        else:
+            data = db.query(pereval_added, coords, users)\
+                .filter(pereval_added.c.id==item_id)\
+                .filter(pereval_added.c.coords_id==coords.c.id)\
+                .filter(pereval_added.c.user_id==users.c.id)\
+                .filter(pereval_added.c.status=='accepted')
+            data = data.outerjoin(pereval_images, pereval_images.c.pereval_added_id == pereval_added.c.id)
+            data = data.outerjoin(images, images.c.id == pereval_images.c.image_id)
+
+            return data.first()
+
+
+@app.patch("/{item_id}", response_model=Response)
+def update_item(item_id: int, item: Pereval_out_update, db: SessionLocal = Depends(get_db)):
+    try:
+        db_item = db.query(pereval_added).filter(pereval_added.c.id==item_id)[0]
+    except IndexError:
+        return {'status': 404, 'message': 'Item not found'}
+    else:
+        if db_item.status != 'new':
+            return {'status': 409, 'message': 'Forbidden. Item already accepted'}
+        else:
+            item_data = item.dict(exclude_unset=True)
+
+            set_coords = ['latitude', 'longitude', 'height']
+            coords_data = {}
+            images_data = {}
+            for key in set_coords:
+                if key in item_data:
+                    coords_data[key] = item_data.pop(key)
+
+            if 'images' in item_data:
+                images_data['images'] = item_data.pop('images')
+            if item_data:
+                db.query(pereval_added).filter(pereval_added.c.id == item_id).update(item_data)
+            if coords_data:
+                db.query(coords).filter(coords.c.id == db_item.coords_id).update(coords_data)
+            db.commit()
+            data = db.query(pereval_added).filter(pereval_added.c.id == item_id)[0]
+            return {"status": 200, "message": "Item succesfully updated"}
