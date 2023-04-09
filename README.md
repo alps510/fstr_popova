@@ -9,6 +9,8 @@ The following features are available:
 - Get data of the object by id
 - Add a new user
 
+![Image alt](https://github.com/alps510/fstr_popova/raw/refactor/fstr_img.jpg)
+
 Repository contains code for asynchronous api using
 the Fast Api framework ,Uvicorn server and Postgres Database
 ## Preconditions:
