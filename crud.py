@@ -1,18 +1,21 @@
-
 from models import users, database, pereval_added, coords, pereval_images, images, SessionLocal
 from schemas import Users, Pereval_out_update, Pereval_added
-from fastapi.responses import JSONResponse
 
 
-async def add_user(user: Users):
+async def add_user(user: Users, db: SessionLocal):
     query = users.insert().values(
         email=user.email,
         phone=user.phone,
         surname=user.fam,
         name=user.name,
         patronimic=user.otc)
-    last_id = await database.execute(query=query)
+    last_id = await database.execute(query)
     return last_id
+
+
+async def get_user(user_id: int, db: SessionLocal):
+    data = db.query(users).filter(users.c.id == user_id)
+    return data[0]
 
 
 async def get_items(user_id: int, db: SessionLocal):

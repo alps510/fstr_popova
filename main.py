@@ -1,13 +1,14 @@
 from fastapi import FastAPI
+from crud import add_user, get_items, get_item, get_item_out, put_item, post_item, row_to_str, get_user
+from models import SessionLocal, get_db
 from models import database
-    #, SessionLocal, get_db
-from crud import add_user, get_items, get_item, get_item_out, put_item, post_item, row_to_str
+
 from schemas import Response, Users, Pereval_out_list, Pereval_out, Pereval_out_update
 from fastapi.responses import JSONResponse
 from typing import List
 from fastapi import Depends
 from asyncpg.exceptions import UniqueViolationError
-from models import SessionLocal, get_db
+
 
 
 app = FastAPI()
@@ -37,16 +38,21 @@ async def submit_data(input_json, db: SessionLocal = Depends(get_db)):
 
 
 @app.post('/users/')
-async def create_user(user: Users):
-    return await add_user(user)
+async def create_user(user: Users, db: SessionLocal = Depends(get_db)):
+    return await add_user(user, db)
 
 
-@app.get('/', response_model=List[Pereval_out_list])
+@app.get('/users/{user_id}')
+async def read_user(user_id: int, db: SessionLocal = Depends(get_db)):
+    return await get_user(user_id, db)
+
+
+@app.get('/{user_id}', response_model=List[Pereval_out_list])
 async def read_data(user_id: int, db: SessionLocal = Depends(get_db)):
     return await get_items(user_id, db)
 
 
-@app.get('/{item_id}', response_model=Pereval_out, responses={404: {"model": Response}})
+@app.get('/items/{item_id}', response_model=Pereval_out, responses={404: {"model": Response}})
 async def read_item(item_id: int, db: SessionLocal = Depends(get_db)):
     try:
         item = await get_item(item_id, db)

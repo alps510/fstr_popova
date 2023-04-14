@@ -14,6 +14,12 @@ FSTR_DB_PORT = os.getenv('FSTR_DB_PORT')
 FSTR_DB_LOGIN = os.getenv('FSTR_DB_LOGIN')
 FSTR_DB_PASS = os.getenv('FSTR_DB_PASS')
 
+DB_HOST_TEST = os.getenv('DB_HOST_TEST')
+DB_NAME_TEST = os.getenv('DB_NAME_TEST')
+DB_PASS_TEST = os.getenv('DB_PASS_TEST')
+DB_PORT_TEST = os.getenv('DB_PORT_TEST')
+DB_USER_TEST = os.getenv('DB_USER_TEST')
+
 
 DATABASE_URL = 'postgresql+psycopg2://' + FSTR_DB_LOGIN + ':' + FSTR_DB_PASS + '@' + FSTR_DB_HOST + ':' + FSTR_DB_PORT + '/pereval'
 
