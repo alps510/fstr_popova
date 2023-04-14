@@ -1,5 +1,30 @@
 import sqlalchemy
+import os
+from dotenv import load_dotenv
+import databases
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
+load_dotenv()
+
+
+FSTR_DB_HOST = os.getenv('FSTR_DB_HOST')
+FSTR_DB_PORT = os.getenv('FSTR_DB_PORT')
+FSTR_DB_LOGIN = os.getenv('FSTR_DB_LOGIN')
+FSTR_DB_PASS = os.getenv('FSTR_DB_PASS')
+
+DB_HOST_TEST = os.getenv('DB_HOST_TEST')
+DB_NAME_TEST = os.getenv('DB_NAME_TEST')
+DB_PASS_TEST = os.getenv('DB_PASS_TEST')
+DB_PORT_TEST = os.getenv('DB_PORT_TEST')
+DB_USER_TEST = os.getenv('DB_USER_TEST')
+
+
+DATABASE_URL = 'postgresql+psycopg2://' + FSTR_DB_LOGIN + ':' + FSTR_DB_PASS + '@' + FSTR_DB_HOST + ':' + FSTR_DB_PORT + '/pereval'
+
+
+engine = create_engine(DATABASE_URL)
 metadata = sqlalchemy.MetaData()
 
 coords = sqlalchemy.Table(
@@ -56,3 +81,18 @@ pereval_images = sqlalchemy.Table(
     sqlalchemy.Column('pereval_added_id', sqlalchemy.ForeignKey('pereval_added.id'), nullable=False),
     sqlalchemy.Column('image_id', sqlalchemy.ForeignKey('images.id'), nullable=False),
 )
+
+database = databases.Database(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+metadata.create_all(engine)
